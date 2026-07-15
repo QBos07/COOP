@@ -593,3 +593,33 @@ const char *coop_status_string(CoopStatus status) {
             return "unknown";
     }
 }
+
+static const CoopApi COOP_API = {
+    .type_register = coop_type_register,
+    .type_destroy = coop_type_destroy,
+    .type_name = coop_type_name,
+    .type_instance_size = coop_type_instance_size,
+    .type_is_a = coop_type_is_a,
+    .type_parent_offset = coop_type_parent_offset,
+    .object_new = coop_object_new,
+    .object_delete = coop_object_delete,
+    .object_type = coop_object_type,
+    .object_is_a = coop_object_is_a,
+    .object_as = coop_object_as,
+    .invoke_public = coop_invoke_public,
+    .invoke_protected = coop_invoke_protected,
+    .invoke_private = coop_invoke_private,
+    .invoke_parent = coop_invoke_parent,
+    .invoke_static_public = coop_invoke_static_public,
+    .invoke_static_protected = coop_invoke_static_protected,
+    .invoke_static_private = coop_invoke_static_private,
+    .field_public_ptr = coop_field_public_ptr,
+    .field_protected_ptr = coop_field_protected_ptr,
+    .field_private_ptr = coop_field_private_ptr,
+    .static_field_public_ptr = coop_static_field_public_ptr,
+    .static_field_protected_ptr = coop_static_field_protected_ptr,
+    .static_field_private_ptr = coop_static_field_private_ptr,
+    .status_string = coop_status_string,
+};
+
+const CoopApi *coop = &COOP_API;

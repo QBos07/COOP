@@ -146,6 +146,71 @@ CoopStatus coop_static_field_private_ptr(const CoopType *owner,
 
 const char *coop_status_string(CoopStatus status);
 
+typedef struct CoopApi {
+    CoopStatus (*type_register)(const CoopTypeDef *def, CoopType **out_type);
+    void (*type_destroy)(CoopType *type);
+    const char *(*type_name)(const CoopType *type);
+    size_t (*type_instance_size)(const CoopType *type);
+    bool (*type_is_a)(const CoopType *type, const CoopType *target);
+    CoopStatus (*type_parent_offset)(const CoopType *type, const CoopType *target, size_t *out_offset);
+    CoopStatus (*object_new)(const CoopType *type, void **out_obj);
+    void (*object_delete)(void *obj);
+    const CoopType *(*object_type)(const void *obj);
+    bool (*object_is_a)(const void *obj, const CoopType *target);
+    CoopStatus (*object_as)(void *obj, const CoopType *target, void **out_view);
+    CoopStatus (*invoke_public)(void *obj, const char *method_name, void *result, void **args, size_t arg_count);
+    CoopStatus (*invoke_protected)(void *obj,
+                                   const CoopType *caller,
+                                   const char *method_name,
+                                   void *result,
+                                   void **args,
+                                   size_t arg_count);
+    CoopStatus (*invoke_private)(void *obj,
+                                 const CoopType *caller,
+                                 const char *method_name,
+                                 void *result,
+                                 void **args,
+                                 size_t arg_count);
+    CoopStatus (*invoke_parent)(void *obj,
+                                const CoopType *parent,
+                                const char *method_name,
+                                void *result,
+                                void **args,
+                                size_t arg_count);
+    CoopStatus (*invoke_static_public)(const CoopType *owner,
+                                       const char *method_name,
+                                       void *result,
+                                       void **args,
+                                       size_t arg_count);
+    CoopStatus (*invoke_static_protected)(const CoopType *owner,
+                                          const CoopType *caller,
+                                          const char *method_name,
+                                          void *result,
+                                          void **args,
+                                          size_t arg_count);
+    CoopStatus (*invoke_static_private)(const CoopType *owner,
+                                        const CoopType *caller,
+                                        const char *method_name,
+                                        void *result,
+                                        void **args,
+                                        size_t arg_count);
+    CoopStatus (*field_public_ptr)(void *obj, const char *field_name, void **out_ptr);
+    CoopStatus (*field_protected_ptr)(void *obj, const CoopType *caller, const char *field_name, void **out_ptr);
+    CoopStatus (*field_private_ptr)(void *obj, const CoopType *caller, const char *field_name, void **out_ptr);
+    CoopStatus (*static_field_public_ptr)(const CoopType *owner, const char *field_name, void **out_ptr);
+    CoopStatus (*static_field_protected_ptr)(const CoopType *owner,
+                                             const CoopType *caller,
+                                             const char *field_name,
+                                             void **out_ptr);
+    CoopStatus (*static_field_private_ptr)(const CoopType *owner,
+                                           const CoopType *caller,
+                                           const char *field_name,
+                                           void **out_ptr);
+    const char *(*status_string)(CoopStatus status);
+} CoopApi;
+
+extern const CoopApi *coop;
+
 #ifdef __cplusplus
 }
 #endif

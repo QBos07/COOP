@@ -1,7 +1,8 @@
 #include "coop/coop.h"
 
+#include <cmocka.h>
 #include <stddef.h>
-#include <stdio.h>
+#include <setjmp.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -43,42 +44,9 @@ static CoopType *g_dog_type = NULL;
 static CoopType *g_chimera_type = NULL;
 static CoopType *g_entity_type = NULL;
 
-#define EXPECT_TRUE(expr)                                                                             \
-    do {                                                                                              \
-        if (!(expr)) {                                                                                \
-            fprintf(stderr, "EXPECT_TRUE failed at %s:%d: %s\n", __FILE__, __LINE__, #expr);       \
-            return false;                                                                             \
-        }                                                                                             \
-    } while (0)
-
-#define EXPECT_STATUS(actual, expected)                                                               \
-    do {                                                                                              \
-        CoopStatus _a = (actual);                                                                     \
-        CoopStatus _e = (expected);                                                                   \
-        if (_a != _e) {                                                                               \
-            fprintf(stderr,                                                                            \
-                    "EXPECT_STATUS failed at %s:%d: got %s expected %s\n",                         \
-                    __FILE__,                                                                          \
-                    __LINE__,                                                                          \
-                    coop_status_string(_a),                                                           \
-                    coop_status_string(_e));                                                          \
-            return false;                                                                             \
-        }                                                                                             \
-    } while (0)
-
-#define EXPECT_INT_EQ(actual, expected)                                                               \
-    do {                                                                                              \
-        int _a = (actual);                                                                            \
-        int _e = (expected);                                                                          \
-        if (_a != _e) {                                                                               \
-            fprintf(stderr, "EXPECT_INT_EQ failed at %s:%d: got %d expected %d\n",                 \
-                    __FILE__,                                                                          \
-                    __LINE__,                                                                          \
-                    _a,                                                                                \
-                    _e);                                                                               \
-            return false;                                                                             \
-        }                                                                                             \
-    } while (0)
+static void assert_status(CoopStatus actual, CoopStatus expected) {
+    assert_int_equal((int)actual, (int)expected);
+}
 
 static void animal_ctor(void *self) {
     Animal *animal = (Animal *)self;
@@ -244,7 +212,9 @@ static const CoopMethodDesc DOG_METHODS[] = {
     {.name = "speak", .fn = dog_speak, .visibility = COOP_VIS_PUBLIC, .is_static = false, .is_virtual = true},
 };
 
-static bool register_types(void) {
+static int register_types(void **state) {
+    (void)state;
+
     CoopStatus st;
 
     static const CoopTypeDef ANIMAL_DEF = {
@@ -292,19 +262,19 @@ static bool register_types(void) {
         .dtor = NULL,
     };
 
-    st = coop_type_register(&ANIMAL_DEF, &g_animal_type);
+    st = coop->type_register(&ANIMAL_DEF, &g_animal_type);
     if (st != COOP_STATUS_OK) {
-        return false;
+        return -1;
     }
 
-    st = coop_type_register(&PET_DEF, &g_pet_type);
+    st = coop->type_register(&PET_DEF, &g_pet_type);
     if (st != COOP_STATUS_OK) {
-        return false;
+        return -1;
     }
 
-    st = coop_type_register(&ENTITY_DEF, &g_entity_type);
+    st = coop->type_register(&ENTITY_DEF, &g_entity_type);
     if (st != COOP_STATUS_OK) {
-        return false;
+        return -1;
     }
 
     static CoopParentLink dog_parents[2];
@@ -328,9 +298,9 @@ static bool register_types(void) {
         .dtor = dog_dtor,
     };
 
-    st = coop_type_register(&DOG_DEF, &g_dog_type);
+    st = coop->type_register(&DOG_DEF, &g_dog_type);
     if (st != COOP_STATUS_OK) {
-        return false;
+        return -1;
     }
 
     static CoopParentLink chimera_parents[2];
@@ -354,203 +324,184 @@ static bool register_types(void) {
         .dtor = NULL,
     };
 
-    st = coop_type_register(&CHIMERA_DEF, &g_chimera_type);
-    return st == COOP_STATUS_OK;
+    st = coop->type_register(&CHIMERA_DEF, &g_chimera_type);
+    return st == COOP_STATUS_OK ? 0 : -1;
 }
 
-static void destroy_types(void) {
-    coop_type_destroy(g_chimera_type);
-    coop_type_destroy(g_dog_type);
-    coop_type_destroy(g_entity_type);
-    coop_type_destroy(g_pet_type);
-    coop_type_destroy(g_animal_type);
+static int destroy_types(void **state) {
+    (void)state;
+
+    coop->type_destroy(g_chimera_type);
+    coop->type_destroy(g_dog_type);
+    coop->type_destroy(g_entity_type);
+    coop->type_destroy(g_pet_type);
+    coop->type_destroy(g_animal_type);
     g_chimera_type = NULL;
     g_dog_type = NULL;
     g_entity_type = NULL;
     g_pet_type = NULL;
     g_animal_type = NULL;
+    return 0;
 }
 
-static bool test_registration_and_rtti(void) {
-    EXPECT_TRUE(strcmp(coop_type_name(g_dog_type), "Dog") == 0);
-    EXPECT_TRUE(coop_type_is_a(g_dog_type, g_dog_type));
-    EXPECT_TRUE(coop_type_is_a(g_dog_type, g_animal_type));
-    EXPECT_TRUE(coop_type_is_a(g_dog_type, g_pet_type));
-    EXPECT_TRUE(!coop_type_is_a(g_animal_type, g_pet_type));
+static void test_registration_and_rtti(void **state) {
+    (void)state;
+
+    assert_string_equal(coop->type_name(g_dog_type), "Dog");
+    assert_true(coop->type_is_a(g_dog_type, g_dog_type));
+    assert_true(coop->type_is_a(g_dog_type, g_animal_type));
+    assert_true(coop->type_is_a(g_dog_type, g_pet_type));
+    assert_false(coop->type_is_a(g_animal_type, g_pet_type));
 
     size_t off = 0u;
-    EXPECT_STATUS(coop_type_parent_offset(g_dog_type, g_pet_type, &off), COOP_STATUS_OK);
-    EXPECT_TRUE(off == offsetof(Dog, pet));
-    return true;
+    assert_status(coop->type_parent_offset(g_dog_type, g_pet_type, &off), COOP_STATUS_OK);
+    assert_int_equal((int)off, (int)offsetof(Dog, pet));
 }
 
-static bool test_abstract_enforcement(void) {
+static void test_abstract_enforcement(void **state) {
+    (void)state;
+
     void *obj = NULL;
-    EXPECT_STATUS(coop_object_new(g_entity_type, &obj), COOP_STATUS_ABSTRACT_TYPE);
-    EXPECT_TRUE(obj == NULL);
-    return true;
+    assert_status(coop->object_new(g_entity_type, &obj), COOP_STATUS_ABSTRACT_TYPE);
+    assert_null(obj);
 }
 
-static bool test_lifecycle_and_dispatch(void) {
+static void test_lifecycle_and_dispatch(void **state) {
+    (void)state;
+
     g_ctor_count = 0;
     g_dtor_count = 0;
 
     void *dog = NULL;
-    EXPECT_STATUS(coop_object_new(g_dog_type, &dog), COOP_STATUS_OK);
-    EXPECT_INT_EQ(g_ctor_count, 3);
+    assert_status(coop->object_new(g_dog_type, &dog), COOP_STATUS_OK);
+    assert_int_equal(g_ctor_count, 3);
 
     int out = 0;
-    EXPECT_STATUS(coop_invoke_public(dog, "speak", &out, NULL, 0u), COOP_STATUS_OK);
-    EXPECT_INT_EQ(out, 2);
+    assert_status(coop->invoke_public(dog, "speak", &out, NULL, 0u), COOP_STATUS_OK);
+    assert_int_equal(out, 2);
 
-    EXPECT_STATUS(coop_invoke_parent(dog, g_animal_type, "speak", &out, NULL, 0u), COOP_STATUS_OK);
-    EXPECT_INT_EQ(out, 1);
+    assert_status(coop->invoke_parent(dog, g_animal_type, "speak", &out, NULL, 0u), COOP_STATUS_OK);
+    assert_int_equal(out, 1);
 
-    EXPECT_STATUS(coop_invoke_parent(dog, g_pet_type, "speak", &out, NULL, 0u), COOP_STATUS_OK);
-    EXPECT_INT_EQ(out, 3);
+    assert_status(coop->invoke_parent(dog, g_pet_type, "speak", &out, NULL, 0u), COOP_STATUS_OK);
+    assert_int_equal(out, 3);
 
-    coop_object_delete(dog);
-    EXPECT_INT_EQ(g_dtor_count, 3);
-    return true;
+    coop->object_delete(dog);
+    assert_int_equal(g_dtor_count, 3);
 }
 
-static bool test_multiple_inheritance_resolution_order(void) {
+static void test_multiple_inheritance_resolution_order(void **state) {
+    (void)state;
+
     void *chimera = NULL;
-    EXPECT_STATUS(coop_object_new(g_chimera_type, &chimera), COOP_STATUS_OK);
+    assert_status(coop->object_new(g_chimera_type, &chimera), COOP_STATUS_OK);
 
     int out = 0;
-    EXPECT_STATUS(coop_invoke_public(chimera, "speak", &out, NULL, 0u), COOP_STATUS_OK);
-    EXPECT_INT_EQ(out, 1);
+    assert_status(coop->invoke_public(chimera, "speak", &out, NULL, 0u), COOP_STATUS_OK);
+    assert_int_equal(out, 1);
 
-    coop_object_delete(chimera);
-    return true;
+    coop->object_delete(chimera);
 }
 
-static bool test_parent_view_and_polymorphism(void) {
-    void *dog = NULL;
-    EXPECT_STATUS(coop_object_new(g_dog_type, &dog), COOP_STATUS_OK);
+static void test_parent_view_and_polymorphism(void **state) {
+    (void)state;
 
-    EXPECT_TRUE(coop_object_is_a(dog, g_animal_type));
-    EXPECT_TRUE(coop_object_is_a(dog, g_pet_type));
+    void *dog = NULL;
+    assert_status(coop->object_new(g_dog_type, &dog), COOP_STATUS_OK);
+
+    assert_true(coop->object_is_a(dog, g_animal_type));
+    assert_true(coop->object_is_a(dog, g_pet_type));
 
     void *pet_view = NULL;
-    EXPECT_STATUS(coop_object_as(dog, g_pet_type, &pet_view), COOP_STATUS_OK);
-    EXPECT_TRUE((char *)pet_view == (char *)dog + offsetof(Dog, pet));
-    EXPECT_TRUE(coop_object_type(pet_view) == g_dog_type);
+    assert_status(coop->object_as(dog, g_pet_type, &pet_view), COOP_STATUS_OK);
+    assert_ptr_equal((char *)pet_view, (char *)dog + offsetof(Dog, pet));
+    assert_ptr_equal(coop->object_type(pet_view), g_dog_type);
 
-    coop_object_delete(dog);
-    return true;
+    coop->object_delete(dog);
 }
 
-static bool test_visibility_and_encapsulation(void) {
+static void test_visibility_and_encapsulation(void **state) {
+    (void)state;
+
     void *dog = NULL;
-    EXPECT_STATUS(coop_object_new(g_dog_type, &dog), COOP_STATUS_OK);
+    assert_status(coop->object_new(g_dog_type, &dog), COOP_STATUS_OK);
 
     void *ptr = NULL;
-    EXPECT_STATUS(coop_field_public_ptr(dog, "age", &ptr), COOP_STATUS_OK);
-    EXPECT_TRUE(ptr != NULL);
+    assert_status(coop->field_public_ptr(dog, "age", &ptr), COOP_STATUS_OK);
+    assert_non_null(ptr);
 
-    EXPECT_STATUS(coop_field_public_ptr(dog, "guard", &ptr), COOP_STATUS_ACCESS_DENIED);
-    EXPECT_STATUS(coop_field_protected_ptr(dog, g_dog_type, "guard", &ptr), COOP_STATUS_OK);
-    EXPECT_STATUS(coop_field_private_ptr(dog, g_dog_type, "secret", &ptr), COOP_STATUS_ACCESS_DENIED);
-    EXPECT_STATUS(coop_field_private_ptr(dog, g_animal_type, "secret", &ptr), COOP_STATUS_OK);
+    assert_status(coop->field_public_ptr(dog, "guard", &ptr), COOP_STATUS_ACCESS_DENIED);
+    assert_status(coop->field_protected_ptr(dog, g_dog_type, "guard", &ptr), COOP_STATUS_OK);
+    assert_status(coop->field_private_ptr(dog, g_dog_type, "secret", &ptr), COOP_STATUS_ACCESS_DENIED);
+    assert_status(coop->field_private_ptr(dog, g_animal_type, "secret", &ptr), COOP_STATUS_OK);
 
     int out = 0;
-    EXPECT_STATUS(coop_invoke_public(dog, "guarded_touch", &out, NULL, 0u), COOP_STATUS_ACCESS_DENIED);
-    EXPECT_STATUS(coop_invoke_protected(dog, g_dog_type, "guarded_touch", &out, NULL, 0u), COOP_STATUS_OK);
-    EXPECT_STATUS(coop_invoke_private(dog, g_dog_type, "set_secret", &out, NULL, 0u), COOP_STATUS_ACCESS_DENIED);
+    assert_status(coop->invoke_public(dog, "guarded_touch", &out, NULL, 0u), COOP_STATUS_ACCESS_DENIED);
+    assert_status(coop->invoke_protected(dog, g_dog_type, "guarded_touch", &out, NULL, 0u), COOP_STATUS_OK);
+    assert_status(coop->invoke_private(dog, g_dog_type, "set_secret", &out, NULL, 0u), COOP_STATUS_ACCESS_DENIED);
 
     int secret = 77;
     void *args[] = {&secret};
-    EXPECT_STATUS(coop_invoke_private(dog, g_animal_type, "set_secret", &out, args, 1u), COOP_STATUS_OK);
-    EXPECT_INT_EQ(out, 77);
+    assert_status(coop->invoke_private(dog, g_animal_type, "set_secret", &out, args, 1u), COOP_STATUS_OK);
+    assert_int_equal(out, 77);
 
-    coop_object_delete(dog);
-    return true;
+    coop->object_delete(dog);
 }
 
-static bool test_static_fields_and_methods(void) {
+static void test_static_fields_and_methods(void **state) {
+    (void)state;
+
     void *ptr = NULL;
-    EXPECT_STATUS(coop_static_field_public_ptr(g_animal_type, "population", &ptr), COOP_STATUS_OK);
+    assert_status(coop->static_field_public_ptr(g_animal_type, "population", &ptr), COOP_STATUS_OK);
     int *population = (int *)ptr;
     *population = 10;
 
     int delta = 5;
     void *args[] = {&delta};
     int out = 0;
-    EXPECT_STATUS(coop_invoke_static_public(g_animal_type, "bump_population", &out, args, 1u), COOP_STATUS_OK);
-    EXPECT_INT_EQ(out, 15);
+    assert_status(coop->invoke_static_public(g_animal_type, "bump_population", &out, args, 1u), COOP_STATUS_OK);
+    assert_int_equal(out, 15);
 
-    EXPECT_STATUS(coop_static_field_public_ptr(g_animal_type, "seed", &ptr), COOP_STATUS_ACCESS_DENIED);
-    EXPECT_STATUS(coop_invoke_static_private(g_animal_type, g_dog_type, "reseed", &out, args, 1u), COOP_STATUS_ACCESS_DENIED);
-    EXPECT_STATUS(coop_invoke_static_private(g_animal_type, g_animal_type, "reseed", &out, args, 1u), COOP_STATUS_OK);
-    EXPECT_INT_EQ(out, 5);
+    assert_status(coop->static_field_public_ptr(g_animal_type, "seed", &ptr), COOP_STATUS_ACCESS_DENIED);
+    assert_status(coop->invoke_static_private(g_animal_type, g_dog_type, "reseed", &out, args, 1u), COOP_STATUS_ACCESS_DENIED);
+    assert_status(coop->invoke_static_private(g_animal_type, g_animal_type, "reseed", &out, args, 1u), COOP_STATUS_OK);
+    assert_int_equal(out, 5);
 
-    EXPECT_STATUS(coop_static_field_protected_ptr(g_animal_type, g_dog_type, "revision", &ptr), COOP_STATUS_OK);
+    assert_status(coop->static_field_protected_ptr(g_animal_type, g_dog_type, "revision", &ptr), COOP_STATUS_OK);
     *(int *)ptr = 9;
-    EXPECT_STATUS(coop_static_field_public_ptr(g_animal_type, "revision", &ptr), COOP_STATUS_ACCESS_DENIED);
-    return true;
+    assert_status(coop->static_field_public_ptr(g_animal_type, "revision", &ptr), COOP_STATUS_ACCESS_DENIED);
 }
 
-static bool test_method_argument_and_field_mutation(void) {
+static void test_method_argument_and_field_mutation(void **state) {
+    (void)state;
+
     void *dog = NULL;
-    EXPECT_STATUS(coop_object_new(g_dog_type, &dog), COOP_STATUS_OK);
+    assert_status(coop->object_new(g_dog_type, &dog), COOP_STATUS_OK);
 
     int amount = 4;
     void *args[] = {&amount};
     int out = 0;
-    EXPECT_STATUS(coop_invoke_public(dog, "grow", &out, args, 1u), COOP_STATUS_OK);
-    EXPECT_INT_EQ(out, 5);
+    assert_status(coop->invoke_public(dog, "grow", &out, args, 1u), COOP_STATUS_OK);
+    assert_int_equal(out, 5);
 
     void *age_ptr = NULL;
-    EXPECT_STATUS(coop_field_public_ptr(dog, "age", &age_ptr), COOP_STATUS_OK);
-    EXPECT_INT_EQ(*(int *)age_ptr, 5);
+    assert_status(coop->field_public_ptr(dog, "age", &age_ptr), COOP_STATUS_OK);
+    assert_int_equal(*(int *)age_ptr, 5);
 
-    coop_object_delete(dog);
-    return true;
+    coop->object_delete(dog);
 }
 
-typedef bool (*TestFn)(void);
-
-typedef struct TestCase {
-    const char *name;
-    TestFn fn;
-} TestCase;
-
 int main(void) {
-    if (!register_types()) {
-        fprintf(stderr, "failed to register types\n");
-        destroy_types();
-        return EXIT_FAILURE;
-    }
-
-    const TestCase tests[] = {
-        {"registration_and_rtti", test_registration_and_rtti},
-        {"abstract_enforcement", test_abstract_enforcement},
-        {"lifecycle_and_dispatch", test_lifecycle_and_dispatch},
-        {"mi_resolution_order", test_multiple_inheritance_resolution_order},
-        {"parent_view_and_polymorphism", test_parent_view_and_polymorphism},
-        {"visibility_and_encapsulation", test_visibility_and_encapsulation},
-        {"static_fields_and_methods", test_static_fields_and_methods},
-        {"method_argument_and_field_mutation", test_method_argument_and_field_mutation},
+    const struct CMUnitTest tests[] = {
+        cmocka_unit_test(test_registration_and_rtti),
+        cmocka_unit_test(test_abstract_enforcement),
+        cmocka_unit_test(test_lifecycle_and_dispatch),
+        cmocka_unit_test(test_multiple_inheritance_resolution_order),
+        cmocka_unit_test(test_parent_view_and_polymorphism),
+        cmocka_unit_test(test_visibility_and_encapsulation),
+        cmocka_unit_test(test_static_fields_and_methods),
+        cmocka_unit_test(test_method_argument_and_field_mutation),
     };
 
-    size_t failed = 0u;
-    for (size_t i = 0; i < sizeof(tests) / sizeof(tests[0]); ++i) {
-        bool ok = tests[i].fn();
-        printf("[%s] %s\n", ok ? "PASS" : "FAIL", tests[i].name);
-        if (!ok) {
-            failed++;
-        }
-    }
-
-    destroy_types();
-
-    if (failed != 0u) {
-        fprintf(stderr, "%zu test(s) failed\n", failed);
-        return EXIT_FAILURE;
-    }
-
-    printf("all tests passed\n");
-    return EXIT_SUCCESS;
+    return cmocka_run_group_tests(tests, register_types, destroy_types);
 }
