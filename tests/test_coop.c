@@ -1,10 +1,11 @@
 #include "coop/coop.h"
 
-#include <cmocka.h>
 #include <stddef.h>
+#include <stdarg.h>
 #include <setjmp.h>
 #include <stdlib.h>
 #include <string.h>
+#include <cmocka.h>
 
 typedef struct Animal {
     CoopObject base;
