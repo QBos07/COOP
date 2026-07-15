@@ -1,5 +1,4 @@
-#ifndef COOP_COOP_H
-#define COOP_COOP_H
+#pragma once
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -52,15 +51,15 @@ typedef struct CoopFieldDesc {
     size_t offset;
     size_t size;
     CoopVisibility visibility;
-    bool is_static;
+    bool is_static : 1;
 } CoopFieldDesc;
 
 typedef struct CoopMethodDesc {
     const char *name;
     CoopMethodFn fn;
     CoopVisibility visibility;
-    bool is_static;
-    bool is_virtual;
+    bool is_static : 1;
+    bool is_virtual : 1;
 } CoopMethodDesc;
 
 typedef struct CoopTypeDef {
@@ -77,74 +76,6 @@ typedef struct CoopTypeDef {
     CoopCtorFn ctor;
     CoopDtorFn dtor;
 } CoopTypeDef;
-
-CoopStatus coop_type_register(const CoopTypeDef *def, CoopType **out_type);
-void coop_type_destroy(CoopType *type);
-
-const char *coop_type_name(const CoopType *type);
-size_t coop_type_instance_size(const CoopType *type);
-bool coop_type_is_a(const CoopType *type, const CoopType *target);
-CoopStatus coop_type_parent_offset(const CoopType *type, const CoopType *target, size_t *out_offset);
-
-CoopStatus coop_object_new(const CoopType *type, void **out_obj);
-void coop_object_delete(void *obj);
-const CoopType *coop_object_type(const void *obj);
-bool coop_object_is_a(const void *obj, const CoopType *target);
-CoopStatus coop_object_as(void *obj, const CoopType *target, void **out_view);
-
-CoopStatus coop_invoke_public(void *obj, const char *method_name, void *result, void **args, size_t arg_count);
-CoopStatus coop_invoke_protected(void *obj,
-                                 const CoopType *caller,
-                                 const char *method_name,
-                                 void *result,
-                                 void **args,
-                                 size_t arg_count);
-CoopStatus coop_invoke_private(void *obj,
-                               const CoopType *caller,
-                               const char *method_name,
-                               void *result,
-                               void **args,
-                               size_t arg_count);
-CoopStatus coop_invoke_parent(void *obj,
-                              const CoopType *parent,
-                              const char *method_name,
-                              void *result,
-                              void **args,
-                              size_t arg_count);
-
-CoopStatus coop_invoke_static_public(const CoopType *owner,
-                                     const char *method_name,
-                                     void *result,
-                                     void **args,
-                                     size_t arg_count);
-CoopStatus coop_invoke_static_protected(const CoopType *owner,
-                                        const CoopType *caller,
-                                        const char *method_name,
-                                        void *result,
-                                        void **args,
-                                        size_t arg_count);
-CoopStatus coop_invoke_static_private(const CoopType *owner,
-                                      const CoopType *caller,
-                                      const char *method_name,
-                                      void *result,
-                                      void **args,
-                                      size_t arg_count);
-
-CoopStatus coop_field_public_ptr(void *obj, const char *field_name, void **out_ptr);
-CoopStatus coop_field_protected_ptr(void *obj, const CoopType *caller, const char *field_name, void **out_ptr);
-CoopStatus coop_field_private_ptr(void *obj, const CoopType *caller, const char *field_name, void **out_ptr);
-
-CoopStatus coop_static_field_public_ptr(const CoopType *owner, const char *field_name, void **out_ptr);
-CoopStatus coop_static_field_protected_ptr(const CoopType *owner,
-                                           const CoopType *caller,
-                                           const char *field_name,
-                                           void **out_ptr);
-CoopStatus coop_static_field_private_ptr(const CoopType *owner,
-                                         const CoopType *caller,
-                                         const char *field_name,
-                                         void **out_ptr);
-
-const char *coop_status_string(CoopStatus status);
 
 typedef struct CoopApi {
     CoopStatus (*type_register)(const CoopTypeDef *def, CoopType **out_type);
@@ -213,6 +144,4 @@ extern const CoopApi *coop;
 
 #ifdef __cplusplus
 }
-#endif
-
 #endif

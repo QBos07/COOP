@@ -16,7 +16,7 @@ target_include_directories(coop
         $<INSTALL_INTERFACE:include>
 )
 
-target_compile_options(coop PRIVATE -Wall -Wextra -Wpedantic -Werror)
+target_compile_options(coop PRIVATE -Wall -Wextra -pedantic -pedantic-errors)
 
 if(COOP_ENABLE_SANITIZERS AND CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(coop PRIVATE -fsanitize=address,undefined)
@@ -42,7 +42,7 @@ endif()
 
 add_executable(coop_tests tests/test_coop.c)
 target_link_libraries(coop_tests PRIVATE COOP::coop ${COOP_CMOCKA_TARGET})
-target_compile_options(coop_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
+target_compile_options(coop_tests PRIVATE -Wall -Wextra -pedantic -pedantic-errors)
 if(COOP_ENABLE_SANITIZERS AND CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(coop_tests PRIVATE -fsanitize=address,undefined)
     target_link_options(coop_tests PRIVATE -fsanitize=address,undefined)

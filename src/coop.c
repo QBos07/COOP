@@ -23,8 +23,69 @@ typedef struct FieldLookup {
 
 struct CoopType {
     CoopTypeDef def;
-    unsigned char *static_storage;
+    uint8_t *static_storage;
 };
+
+static CoopStatus coop_type_register(const CoopTypeDef *def, CoopType **out_type);
+static void coop_type_destroy(CoopType *type);
+static const char *coop_type_name(const CoopType *type);
+static size_t coop_type_instance_size(const CoopType *type);
+static bool coop_type_is_a(const CoopType *type, const CoopType *target);
+static CoopStatus coop_type_parent_offset(const CoopType *type, const CoopType *target, size_t *out_offset);
+static CoopStatus coop_object_new(const CoopType *type, void **out_obj);
+static void coop_object_delete(void *obj);
+static const CoopType *coop_object_type(const void *obj);
+static bool coop_object_is_a(const void *obj, const CoopType *target);
+static CoopStatus coop_object_as(void *obj, const CoopType *target, void **out_view);
+static CoopStatus coop_invoke_public(void *obj, const char *method_name, void *result, void **args, size_t arg_count);
+static CoopStatus coop_invoke_protected(void *obj,
+                                        const CoopType *caller,
+                                        const char *method_name,
+                                        void *result,
+                                        void **args,
+                                        size_t arg_count);
+static CoopStatus coop_invoke_private(void *obj,
+                                      const CoopType *caller,
+                                      const char *method_name,
+                                      void *result,
+                                      void **args,
+                                      size_t arg_count);
+static CoopStatus coop_invoke_parent(void *obj,
+                                     const CoopType *parent,
+                                     const char *method_name,
+                                     void *result,
+                                     void **args,
+                                     size_t arg_count);
+static CoopStatus coop_invoke_static_public(const CoopType *owner,
+                                            const char *method_name,
+                                            void *result,
+                                            void **args,
+                                            size_t arg_count);
+static CoopStatus coop_invoke_static_protected(const CoopType *owner,
+                                               const CoopType *caller,
+                                               const char *method_name,
+                                               void *result,
+                                               void **args,
+                                               size_t arg_count);
+static CoopStatus coop_invoke_static_private(const CoopType *owner,
+                                             const CoopType *caller,
+                                             const char *method_name,
+                                             void *result,
+                                             void **args,
+                                             size_t arg_count);
+static CoopStatus coop_field_public_ptr(void *obj, const char *field_name, void **out_ptr);
+static CoopStatus coop_field_protected_ptr(void *obj, const CoopType *caller, const char *field_name, void **out_ptr);
+static CoopStatus coop_field_private_ptr(void *obj, const CoopType *caller, const char *field_name, void **out_ptr);
+static CoopStatus coop_static_field_public_ptr(const CoopType *owner, const char *field_name, void **out_ptr);
+static CoopStatus coop_static_field_protected_ptr(const CoopType *owner,
+                                                  const CoopType *caller,
+                                                  const char *field_name,
+                                                  void **out_ptr);
+static CoopStatus coop_static_field_private_ptr(const CoopType *owner,
+                                                const CoopType *caller,
+                                                const char *field_name,
+                                                void **out_ptr);
+static const char *coop_status_string(CoopStatus status);
 
 static bool has_ancestor_offset(const CoopType *type,
                                 const CoopType *target,
@@ -140,7 +201,7 @@ static bool lookup_field_in_type(const CoopType *type,
 
 static void init_headers_for_type(const CoopType *type,
                                   const CoopType *dynamic_type,
-                                  unsigned char *root,
+                                  uint8_t *root,
                                   size_t base_offset,
                                   size_t root_size) {
     if (base_offset + sizeof(CoopObject) <= root_size) {
@@ -158,7 +219,7 @@ static void init_headers_for_type(const CoopType *type,
     }
 }
 
-static void run_ctors(const CoopType *type, unsigned char *root, size_t base_offset) {
+static void run_ctors(const CoopType *type, uint8_t *root, size_t base_offset) {
     for (size_t i = 0; i < type->def.parent_count; ++i) {
         const CoopParentLink *link = &type->def.parents[i];
         run_ctors(link->type, root, base_offset + link->offset);
@@ -169,7 +230,7 @@ static void run_ctors(const CoopType *type, unsigned char *root, size_t base_off
     }
 }
 
-static void run_dtors(const CoopType *type, unsigned char *root, size_t base_offset) {
+static void run_dtors(const CoopType *type, uint8_t *root, size_t base_offset) {
     if (type->def.dtor != NULL) {
         type->def.dtor((void *)(root + base_offset));
     }
@@ -206,9 +267,9 @@ static CoopStatus invoke_instance(void *obj,
         return COOP_STATUS_INVALID_CALL;
     }
 
-    unsigned char *root = (unsigned char *)(void *)obj;
-    (void)lookup.method->fn((void *)(root + lookup.self_offset), result, args, arg_count);
-    return COOP_STATUS_OK;
+    uint8_t *root = (uint8_t *)(void *)obj;
+    const int call_status = lookup.method->fn((void *)(root + lookup.self_offset), result, args, arg_count);
+    return call_status == 0 ? COOP_STATUS_OK : COOP_STATUS_INVALID_CALL;
 }
 
 static CoopStatus invoke_static(const CoopType *owner,
@@ -236,8 +297,8 @@ static CoopStatus invoke_static(const CoopType *owner,
     }
 
     void *storage = (void *)lookup.owner->static_storage;
-    (void)lookup.method->fn(storage, result, args, arg_count);
-    return COOP_STATUS_OK;
+    const int call_status = lookup.method->fn(storage, result, args, arg_count);
+    return call_status == 0 ? COOP_STATUS_OK : COOP_STATUS_INVALID_CALL;
 }
 
 static CoopStatus field_ptr_instance(void *obj,
@@ -260,7 +321,7 @@ static CoopStatus field_ptr_instance(void *obj,
         return COOP_STATUS_ACCESS_DENIED;
     }
 
-    unsigned char *root = (unsigned char *)(void *)obj;
+    uint8_t *root = (uint8_t *)(void *)obj;
     *out_ptr = (void *)(root + lookup.self_offset + lookup.field->offset);
     return COOP_STATUS_OK;
 }
@@ -295,6 +356,15 @@ static bool validate_type_def(const CoopTypeDef *def) {
         return false;
     }
     if ((def->flags & COOP_TYPE_FINAL) != 0u && def->parent_count > 0u) {
+        return false;
+    }
+    if (def->parent_count > 0u && def->parents == NULL) {
+        return false;
+    }
+    if (def->field_count > 0u && def->fields == NULL) {
+        return false;
+    }
+    if (def->method_count > 0u && def->methods == NULL) {
         return false;
     }
 
@@ -333,7 +403,7 @@ static bool validate_type_def(const CoopTypeDef *def) {
     return true;
 }
 
-CoopStatus coop_type_register(const CoopTypeDef *def, CoopType **out_type) {
+static CoopStatus coop_type_register(const CoopTypeDef *def, CoopType **out_type) {
     if (def == NULL || out_type == NULL) {
         return COOP_STATUS_INVALID_ARGUMENT;
     }
@@ -348,7 +418,7 @@ CoopStatus coop_type_register(const CoopTypeDef *def, CoopType **out_type) {
 
     type->def = *def;
     if (def->static_size > 0u) {
-        type->static_storage = (unsigned char *)calloc(def->static_size, 1u);
+        type->static_storage = (uint8_t *)calloc(def->static_size, 1u);
         if (type->static_storage == NULL) {
             free(type);
             return COOP_STATUS_ALLOCATION_FAILED;
@@ -359,7 +429,7 @@ CoopStatus coop_type_register(const CoopTypeDef *def, CoopType **out_type) {
     return COOP_STATUS_OK;
 }
 
-void coop_type_destroy(CoopType *type) {
+static void coop_type_destroy(CoopType *type) {
     if (type == NULL) {
         return;
     }
@@ -368,25 +438,25 @@ void coop_type_destroy(CoopType *type) {
     free(type);
 }
 
-const char *coop_type_name(const CoopType *type) {
+static const char *coop_type_name(const CoopType *type) {
     if (type == NULL) {
         return NULL;
     }
     return type->def.name;
 }
 
-size_t coop_type_instance_size(const CoopType *type) {
+static size_t coop_type_instance_size(const CoopType *type) {
     if (type == NULL) {
         return 0u;
     }
     return type->def.instance_size;
 }
 
-bool coop_type_is_a(const CoopType *type, const CoopType *target) {
+static bool coop_type_is_a(const CoopType *type, const CoopType *target) {
     return has_ancestor_offset(type, target, 0u, NULL);
 }
 
-CoopStatus coop_type_parent_offset(const CoopType *type, const CoopType *target, size_t *out_offset) {
+static CoopStatus coop_type_parent_offset(const CoopType *type, const CoopType *target, size_t *out_offset) {
     if (type == NULL || target == NULL || out_offset == NULL) {
         return COOP_STATUS_INVALID_ARGUMENT;
     }
@@ -398,7 +468,7 @@ CoopStatus coop_type_parent_offset(const CoopType *type, const CoopType *target,
     return COOP_STATUS_OK;
 }
 
-CoopStatus coop_object_new(const CoopType *type, void **out_obj) {
+static CoopStatus coop_object_new(const CoopType *type, void **out_obj) {
     if (type == NULL || out_obj == NULL) {
         return COOP_STATUS_INVALID_ARGUMENT;
     }
@@ -406,7 +476,7 @@ CoopStatus coop_object_new(const CoopType *type, void **out_obj) {
         return COOP_STATUS_ABSTRACT_TYPE;
     }
 
-    unsigned char *instance = (unsigned char *)calloc(type->def.instance_size, 1u);
+    uint8_t *instance = (uint8_t *)calloc(type->def.instance_size, 1u);
     if (instance == NULL) {
         return COOP_STATUS_ALLOCATION_FAILED;
     }
@@ -418,19 +488,19 @@ CoopStatus coop_object_new(const CoopType *type, void **out_obj) {
     return COOP_STATUS_OK;
 }
 
-void coop_object_delete(void *obj) {
+static void coop_object_delete(void *obj) {
     if (obj == NULL) {
         return;
     }
 
     CoopObject *header = (CoopObject *)(void *)obj;
     if (header->type != NULL) {
-        run_dtors(header->type, (unsigned char *)(void *)obj, 0u);
+        run_dtors(header->type, (uint8_t *)(void *)obj, 0u);
     }
     free(obj);
 }
 
-const CoopType *coop_object_type(const void *obj) {
+static const CoopType *coop_object_type(const void *obj) {
     if (obj == NULL) {
         return NULL;
     }
@@ -439,11 +509,11 @@ const CoopType *coop_object_type(const void *obj) {
     return header->type;
 }
 
-bool coop_object_is_a(const void *obj, const CoopType *target) {
+static bool coop_object_is_a(const void *obj, const CoopType *target) {
     return coop_type_is_a(coop_object_type(obj), target);
 }
 
-CoopStatus coop_object_as(void *obj, const CoopType *target, void **out_view) {
+static CoopStatus coop_object_as(void *obj, const CoopType *target, void **out_view) {
     if (obj == NULL || target == NULL || out_view == NULL) {
         return COOP_STATUS_INVALID_ARGUMENT;
     }
@@ -454,41 +524,41 @@ CoopStatus coop_object_as(void *obj, const CoopType *target, void **out_view) {
         return COOP_STATUS_TYPE_MISMATCH;
     }
 
-    *out_view = (void *)((unsigned char *)(void *)obj + offset);
+    *out_view = (void *)((uint8_t *)(void *)obj + offset);
     return COOP_STATUS_OK;
 }
 
-CoopStatus coop_invoke_public(void *obj, const char *method_name, void *result, void **args, size_t arg_count) {
+static CoopStatus coop_invoke_public(void *obj, const char *method_name, void *result, void **args, size_t arg_count) {
     const CoopType *dynamic = coop_object_type(obj);
     return invoke_instance(obj, dynamic, 0u, ACCESS_PUBLIC, NULL, method_name, result, args, arg_count);
 }
 
-CoopStatus coop_invoke_protected(void *obj,
-                                 const CoopType *caller,
-                                 const char *method_name,
-                                 void *result,
-                                 void **args,
-                                 size_t arg_count) {
+static CoopStatus coop_invoke_protected(void *obj,
+                                        const CoopType *caller,
+                                        const char *method_name,
+                                        void *result,
+                                        void **args,
+                                        size_t arg_count) {
     const CoopType *dynamic = coop_object_type(obj);
     return invoke_instance(obj, dynamic, 0u, ACCESS_PROTECTED, caller, method_name, result, args, arg_count);
 }
 
-CoopStatus coop_invoke_private(void *obj,
-                               const CoopType *caller,
-                               const char *method_name,
-                               void *result,
-                               void **args,
-                               size_t arg_count) {
+static CoopStatus coop_invoke_private(void *obj,
+                                      const CoopType *caller,
+                                      const char *method_name,
+                                      void *result,
+                                      void **args,
+                                      size_t arg_count) {
     const CoopType *dynamic = coop_object_type(obj);
     return invoke_instance(obj, dynamic, 0u, ACCESS_PRIVATE, caller, method_name, result, args, arg_count);
 }
 
-CoopStatus coop_invoke_parent(void *obj,
-                              const CoopType *parent,
-                              const char *method_name,
-                              void *result,
-                              void **args,
-                              size_t arg_count) {
+static CoopStatus coop_invoke_parent(void *obj,
+                                     const CoopType *parent,
+                                     const char *method_name,
+                                     void *result,
+                                     void **args,
+                                     size_t arg_count) {
     if (obj == NULL || parent == NULL) {
         return COOP_STATUS_INVALID_ARGUMENT;
     }
@@ -510,66 +580,66 @@ CoopStatus coop_invoke_parent(void *obj,
                            arg_count);
 }
 
-CoopStatus coop_invoke_static_public(const CoopType *owner,
-                                     const char *method_name,
-                                     void *result,
-                                     void **args,
-                                     size_t arg_count) {
+static CoopStatus coop_invoke_static_public(const CoopType *owner,
+                                            const char *method_name,
+                                            void *result,
+                                            void **args,
+                                            size_t arg_count) {
     return invoke_static(owner, ACCESS_PUBLIC, NULL, method_name, result, args, arg_count);
 }
 
-CoopStatus coop_invoke_static_protected(const CoopType *owner,
-                                        const CoopType *caller,
-                                        const char *method_name,
-                                        void *result,
-                                        void **args,
-                                        size_t arg_count) {
+static CoopStatus coop_invoke_static_protected(const CoopType *owner,
+                                               const CoopType *caller,
+                                               const char *method_name,
+                                               void *result,
+                                               void **args,
+                                               size_t arg_count) {
     return invoke_static(owner, ACCESS_PROTECTED, caller, method_name, result, args, arg_count);
 }
 
-CoopStatus coop_invoke_static_private(const CoopType *owner,
-                                      const CoopType *caller,
-                                      const char *method_name,
-                                      void *result,
-                                      void **args,
-                                      size_t arg_count) {
+static CoopStatus coop_invoke_static_private(const CoopType *owner,
+                                             const CoopType *caller,
+                                             const char *method_name,
+                                             void *result,
+                                             void **args,
+                                             size_t arg_count) {
     return invoke_static(owner, ACCESS_PRIVATE, caller, method_name, result, args, arg_count);
 }
 
-CoopStatus coop_field_public_ptr(void *obj, const char *field_name, void **out_ptr) {
+static CoopStatus coop_field_public_ptr(void *obj, const char *field_name, void **out_ptr) {
     const CoopType *dynamic = coop_object_type(obj);
     return field_ptr_instance(obj, dynamic, 0u, ACCESS_PUBLIC, NULL, field_name, out_ptr);
 }
 
-CoopStatus coop_field_protected_ptr(void *obj, const CoopType *caller, const char *field_name, void **out_ptr) {
+static CoopStatus coop_field_protected_ptr(void *obj, const CoopType *caller, const char *field_name, void **out_ptr) {
     const CoopType *dynamic = coop_object_type(obj);
     return field_ptr_instance(obj, dynamic, 0u, ACCESS_PROTECTED, caller, field_name, out_ptr);
 }
 
-CoopStatus coop_field_private_ptr(void *obj, const CoopType *caller, const char *field_name, void **out_ptr) {
+static CoopStatus coop_field_private_ptr(void *obj, const CoopType *caller, const char *field_name, void **out_ptr) {
     const CoopType *dynamic = coop_object_type(obj);
     return field_ptr_instance(obj, dynamic, 0u, ACCESS_PRIVATE, caller, field_name, out_ptr);
 }
 
-CoopStatus coop_static_field_public_ptr(const CoopType *owner, const char *field_name, void **out_ptr) {
+static CoopStatus coop_static_field_public_ptr(const CoopType *owner, const char *field_name, void **out_ptr) {
     return field_ptr_static(owner, ACCESS_PUBLIC, NULL, field_name, out_ptr);
 }
 
-CoopStatus coop_static_field_protected_ptr(const CoopType *owner,
-                                           const CoopType *caller,
-                                           const char *field_name,
-                                           void **out_ptr) {
+static CoopStatus coop_static_field_protected_ptr(const CoopType *owner,
+                                                  const CoopType *caller,
+                                                  const char *field_name,
+                                                  void **out_ptr) {
     return field_ptr_static(owner, ACCESS_PROTECTED, caller, field_name, out_ptr);
 }
 
-CoopStatus coop_static_field_private_ptr(const CoopType *owner,
-                                         const CoopType *caller,
-                                         const char *field_name,
-                                         void **out_ptr) {
+static CoopStatus coop_static_field_private_ptr(const CoopType *owner,
+                                                const CoopType *caller,
+                                                const char *field_name,
+                                                void **out_ptr) {
     return field_ptr_static(owner, ACCESS_PRIVATE, caller, field_name, out_ptr);
 }
 
-const char *coop_status_string(CoopStatus status) {
+static const char *coop_status_string(CoopStatus status) {
     switch (status) {
         case COOP_STATUS_OK:
             return "ok";
